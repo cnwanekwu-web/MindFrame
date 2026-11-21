@@ -59,11 +59,11 @@ else:
                 st.error("Please complete all three written explanations before submitting.")
             else:
                 try:
-                    api_key = st.secrets.get("OPENAI_API_KEY", "")
+                    api_key = st.secrets.get("GEMINI_API_KEY", "")
                 except Exception:
                     api_key = ""
                 with st.spinner("Preparing evidence-based review..."):
-                    report = evaluate(st.session_state.history, st.session_state.results, reasoning, solution, follow_answer, api_key)
+                    report = evaluate(st.session_state.history, reasoning, solution, follow_answer, api_key)
                 st.session_state.report_data = {
                     "history": st.session_state.history.copy(),
                     "results": st.session_state.results.copy(),
