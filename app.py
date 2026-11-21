@@ -12,13 +12,21 @@ div.stButton>button{border-color:#4A7777}
 [data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea{background:#17373C;color:#ECF8F6}
 </style>''', unsafe_allow_html=True)
 
-DEFAULT = dict(stage=0, history=[], logs=[], connected=False, saved_profile=True,
+DEFAULT = dict(stage=0, candidate_name='', history=[], logs=[], connected=False, saved_profile=True,
                adapter_enabled=True, credentials_updated=False, outage=False,
                notes="", resolution="", follow_answer="", report=None, commands=0)
 for k,v in DEFAULT.items():
     if k not in st.session_state:
         st.session_state[k] = v.copy() if isinstance(v,list) else v
 s=st.session_state
+if 'candidate_reports' not in s:
+    s.candidate_reports = []
+if 'selected_report_id' not in s:
+    s.selected_report_id = None
+if 'demo_role' not in s:
+    s.demo_role = None
+if 'demo_organization' not in s:
+    s.demo_organization = 'Campus IT Department'
 
 def record(action, result):
     s.history.append(action)
@@ -83,20 +91,139 @@ def gui(action):
     else: out='No action taken.'
     return record('Desktop: '+action,out)
 
-st.markdown('## 🧠 MindFrame')
-st.caption('MORE THAN MEETS THE RÉSUMÉ.  ·  Fictional skills demonstration')
-steps=['Briefing','Workstation','Resolution','Employer review']
-cols=st.columns(4)
-for i,(col,name) in enumerate(zip(cols,steps)):
-    col.markdown(('🟢 ' if i==s.stage else '○ ')+f'**{i+1}. {name}**')
-st.progress((s.stage+1)/4)
+def lab_observations():
+    """Evidence derived from this version of the simulated lab, not old action names."""
+    actions = s.history
+    observations = []
+    checks = [a for a in actions if a.startswith('Desktop: Inspect') or
+              a == 'Desktop: Check coworker connectivity' or
+              any(a.lower().startswith('terminal: ' + x) for x in
+                  ('ipconfig', 'ping', 'netsh wlan show'))]
+    if checks:
+        observations.append(f"Performed {len(checks)} network diagnostic check(s).")
+    if any(a == 'Desktop: Reconnect with updated credentials' for a in actions):
+        observations.append('Attempted to reconnect using updated Wi-Fi credentials.')
+    if any(a.lower().startswith('terminal: ping 8.8.8.8') for a in actions):
+        observations.append('Used a ping test to check connectivity.')
+    if s.connected:
+        observations.append('OfficeNet was connected at the end of the simulation.')
+    else:
+        observations.append('OfficeNet was not connected at the end of the simulation.')
+    if s.outage:
+        observations.append('Restarted the shared router, interrupting coworkers.')
+    failed = sum('Command not recognized' in output for output in s.logs)
+    if failed:
+        observations.append(f'{failed} unsupported command attempt(s) recorded.')
+    return observations
+
+def reset_lab(candidate_name):
+    """Start a fresh simulation without modifying any previously saved reports."""
+    for k, v in DEFAULT.items():
+        s[k] = v.copy() if isinstance(v, list) else v
+    s.candidate_name = candidate_name
+    s.demo_role = 'student'
+    s.stage = 0
+
+def save_completed_report():
+    """Save an independent snapshot; later sign-ins cannot rename old evidence."""
+    import copy
+    snapshot = {
+        'id': len(s.candidate_reports) + 1,
+        'candidate_name': s.candidate_name,
+        'history': list(s.history), 'logs': list(s.logs),
+        'connected': s.connected, 'outage': s.outage,
+        'notes': s.notes, 'resolution': s.resolution,
+        'follow_answer': s.follow_answer,
+        'report': copy.deepcopy(s.report),
+    }
+    s.candidate_reports.append(snapshot)
+    s.selected_report_id = snapshot['id']
+
+# Mock sign-in: this is a presentation prototype, NOT authentication.
+if s.demo_role is None:
+    st.markdown('## 🧠 MindFrame')
+    st.caption('MORE THAN MEETS THE RÉSUMÉ.')
+    st.title('Welcome to MindFrame')
+    st.write('Explore job-related technical skills from either side of the experience.')
+    st.info('DEMO MODE — No accounts are created, identities are not verified, and no real access controls are provided. Use fictional information only.')
+    selected = st.radio('Choose a demo experience', ['Student / Candidate', 'Employer / Reviewer'], horizontal=True)
+    with st.form('mock_sign_in'):
+        if selected == 'Student / Candidate':
+            display_name = st.text_input('Candidate name', value=s.candidate_name or 'Jamie Jones', max_chars=80)
+            st.caption('Your name will appear on your skills report.')
+        else:
+            display_name = st.text_input('Demo organization', value=s.demo_organization, max_chars=80)
+            st.caption('The employer preview only shows evidence generated in this demo session.')
+        enter = st.form_submit_button('Enter demo →', type='primary')
+    if enter:
+        if not display_name.strip():
+            st.error('Please enter a name to continue.')
+        else:
+            if selected == 'Student / Candidate':
+                reset_lab(display_name.strip())
+            else:
+                s.demo_organization = display_name.strip()
+                s.demo_role = 'employer'
+            st.rerun()
+    st.stop()
+
+# Keep navigation in the main content area so it is not clipped by the toolbar.
+if st.button('← Switch demo role', key='switch_role'):
+    s.demo_role = None
+    st.rerun()
+
+if s.demo_role == 'employer':
+    st.markdown('## 🧠 MindFrame')
+    st.caption('MORE THAN MEETS THE RÉSUMÉ. · Employer demo')
+    st.subheader('Employer review portal')
+    st.write('**Organization:**', s.demo_organization)
+    st.caption('Fictional reports from this browser session only. No real authentication or private data storage.')
+    reports = s.candidate_reports
+    if not reports:
+        st.info('No candidate reports yet. Switch demo role, complete a student lab, and return here to view the report.')
+        st.stop()
+    c1,c2=st.columns(2)
+    c1.metric('Completed candidate labs',len(reports))
+    c2.metric('Distinct demo candidates',len(set(r['candidate_name'] for r in reports)))
+    st.markdown('### Candidate reports')
+    for r in reversed(reports):
+        a,b,c=st.columns([3,2,1])
+        a.write('**'+r['candidate_name']+'**')
+        b.write('Connected' if r['connected'] else 'Not resolved')
+        if c.button('View report',key='view_report_'+str(r['id'])):
+            s.selected_report_id = r['id']
+            st.rerun()
+    selected = next((r for r in reports if r['id']==s.selected_report_id),None)
+    if selected is None:
+        st.info('Choose View report to inspect the candidate’s work.')
+        st.stop()
+    st.divider()
+    st.subheader('Evidence report: '+selected['candidate_name'])
+    active = selected
+else:
+    active = None
+
+if s.demo_role == 'employer':
+    s.stage = 3
+else:
+    st.markdown('## 🧠 MindFrame')
+    st.caption('MORE THAN MEETS THE RÉSUMÉ.  ·  Fictional skills demonstration')
+if s.demo_role == 'student':
+    steps=['Briefing','Workstation','Resolution','Your report']
+    cols=st.columns(4)
+    for i,(col,name) in enumerate(zip(cols,steps)):
+        col.markdown(('🟢 ' if i==s.stage else '○ ')+f'**{i+1}. {name}**')
+    st.progress((s.stage+1)/4)
 
 if s.stage==0:
     st.subheader('Support ticket IT-1042')
     st.info('**Alex Morgan (fictional):** My laptop won’t connect to OfficeNet Wi-Fi, and I have a meeting soon. Can you help?')
     st.write('You are the IT support technician. Explore a simulated workstation, diagnose the problem, attempt a repair, and verify the result. Your actions are recorded for evidence-based review.')
     st.warning('This is a safe simulation. No commands run on your actual computer or network.')
-    if st.button('Open remote workstation',type='primary'): s.stage=1;st.rerun()
+    st.write('**Signed in as (demo):**', s.candidate_name)
+    if st.button('Start lab →', type='primary'):
+        s.stage = 1
+        st.rerun()
 
 elif s.stage==1:
     st.subheader('Alex’s remote workstation')
@@ -149,31 +276,40 @@ elif s.stage==2:
             except Exception: key=''
             with st.spinner('Reviewing recorded evidence with Gemini...'):
                 s.report=evaluate(s.history,notes,resolution,follow,key)
+                # The earlier evaluator checks obsolete action labels; use actual lab evidence.
+                s.report['observations'] = lab_observations()
+            save_completed_report()
             s.stage=3;st.rerun()
     if st.button('← Back to workstation'): s.stage=1;st.rerun()
 
 else:
-    st.subheader('Employer review dashboard')
-    st.caption('Fictional candidate · AI-assisted evidence review · Human verification required')
+    st.subheader('Employer review dashboard' if s.demo_role == 'employer' else 'Your skills report')
+    st.caption('AI-assisted evidence review · Human verification required · Mock sign-in only')
+    if s.demo_role == 'employer':
+        st.write('**Reviewer organization:**', s.demo_organization)
+    st.write('**Candidate:**', active['candidate_name'] if active else s.candidate_name)
+    st.write('**Lab:** IT-1042 — OfficeNet connectivity')
     a,b,c=st.columns(3)
-    a.metric('Actions',len(s.history))
-    b.metric('Connection outcome','Connected' if s.connected else 'Not resolved')
-    c.metric('Shared disruption','Yes' if s.outage else 'No')
+    a.metric('Actions',len(active['history'] if active else s.history))
+    b.metric('Connection outcome','Connected' if (active['connected'] if active else s.connected) else 'Not resolved')
+    c.metric('Shared disruption','Yes' if (active['outage'] if active else s.outage) else 'No')
     st.markdown('### Decision timeline')
-    for i,(act,out) in enumerate(zip(s.history,s.logs),1):
-        with st.expander(f'{i}. {act}',expanded=False): st.write(out)
+    for i,(act,out) in enumerate(zip(active['history'] if active else s.history,active['logs'] if active else s.logs),1):
+        with st.expander(f'{i}. {act}',expanded=False): st.code(out, language='text')
     st.markdown('### Candidate explanation')
-    st.write('**Reasoning:**',s.notes)
-    st.write('**Resolution & verification:**',s.resolution)
-    st.write('**Adaptability:**',s.follow_answer)
+    st.write('**Reasoning:**',active['notes'] if active else s.notes)
+    st.write('**Resolution & verification:**',active['resolution'] if active else s.resolution)
+    st.write('**Adaptability:**',active['follow_answer'] if active else s.follow_answer)
     st.markdown('### AI-assisted assessment')
-    report=s.report or {}
+    report=(active['report'] if active else s.report) or {}
     st.caption(report.get('source','No review available'))
     for obs in report.get('observations',[]): st.write('• '+obs)
     st.markdown(report.get('analysis','No analysis available.'))
     with st.expander('Review rubric'):
         for r in report.get('rubric',[]): st.write('• '+r)
     st.info('MindFrame does not make hiring decisions or rank candidates. A human must review the evidence and any AI-generated analysis.')
-    if st.button('Start new lab',type='primary'):
-        for k,v in DEFAULT.items(): s[k]=v.copy() if isinstance(v,list) else v
+    if s.demo_role == 'student':
+        st.success('Your report is ready. To show the reviewer perspective, return to Role selection (demo only) and choose Employer / Reviewer.')
+    if s.demo_role == 'student' and st.button('Start new lab',type='primary'):
+        reset_lab(s.candidate_name)
         st.rerun()
