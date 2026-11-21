@@ -63,7 +63,7 @@ else:
                 except Exception:
                     api_key = ""
                 with st.spinner("Preparing evidence-based review..."):
-                    report = evaluate(st.session_state.history, reasoning, solution, follow_answer, api_key)
+                    report = report = evaluate(st.session_state.history, st.session_state.results, reasoning, solution, follow_answer, api_key)
                 st.session_state.report_data = {
                     "history": st.session_state.history.copy(),
                     "results": st.session_state.results.copy(),
